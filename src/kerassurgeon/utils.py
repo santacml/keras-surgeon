@@ -15,7 +15,9 @@ def clean_copy(model):
 
 def get_channels_attr(layer):
     layer_config = layer.get_config()
-    if layer.__class__.__name__ == "TimeDistributed":
+    if layer.__class__.__name__ == "Embedding":
+        channels_attr = "output_dim"
+    elif layer.__class__.__name__ == "TimeDistributed":
         channels_attr = get_channels_attr(layer.layer)
     elif 'units' in layer_config.keys():
         channels_attr = 'units'

@@ -110,6 +110,94 @@ def high_apoz(apoz, method="std", cutoff_std=1, cutoff_absolute=0.99):
     
     return np.where(apoz >= cutoff)[0]
 
+def get_output(model, layer, x_val, node_indices=None, steps=None):
+
+    if isinstance(layer, str):
+        layer = model.get_layer(name=layer)
+
+    # Check that layer is in the model
+    if layer not in model.layers:
+        raise ValueError('layer is not a valid Layer in model.')
+    
+
+    layer_node_indices = utils.find_nodes_in_model(model, layer)
+    # If no nodes are specified, all of the layer's inbound nodes which are
+    # in model are selected.
+    if not node_indices:
+        node_indices = layer_node_indices
+    # Check for duplicate node indices
+    elif len(node_indices) != len(set(node_indices)):
+        raise ValueError('`node_indices` contains duplicate values.')
+    # Check that all of the selected nodes are in the layer
+    elif not set(node_indices).issubset(layer_node_indices):
+        raise ValueError('One or more nodes specified by `layer` and '
+                         '`node_indices` are not in `model`.')
+
+    data_format = getattr(layer, 'data_format', 'channels_last')
+    # Perform the forward pass and get the activations of the layer.
+    total_sum = None
+    for node_index in node_indices:
+        act_layer, act_index = utils.find_activation_layer(layer, node_index)
+        # Get activations
+        if isinstance(x_val,  types.GeneratorType):
+            # michael santacroce
+            # temp_model = Model(model.inputs, act_layer.get_output_at(act_index))
+            temp_model = Model(model.inputs, layer.get_output_at(node_index))
+            a = temp_model.predict_generator_intermediate(
+                    x_val, 
+                    steps=steps)
+            
+        else:
+            get_activations = k.function(
+                [utils.single_element(model.inputs), k.learning_phase()],
+                [act_layer.get_output_at(act_index)])
+            a = get_activations([x_val, 0])[0]
+            
+        # Ensure that the channels axis is last
+        if data_format == 'channels_first':
+            a = np.swapaxes(a, 1, -1)
+        
+    return a
+
+def get_nodedist(model, layer, x_val, node_indices=None, steps=None, pruneCnt=5):
+
+    # Get output of model
+    kernelVector = get_output(model, layer, x_val, node_indices, steps)
+    
+    # separate each kernel into a different vector in a list
+    numKernels = kernelVector.shape[-1]
+    kernels = []
+    for n in range(0, numKernels):
+        kernels.append(kernelVector[:,:,:,n])
+    
+
+    # Calculate node-distance. Only calculate the upper triangular of the adjacency matrix.
+    toPrune = []
+    while len(toPrune) < pruneCnt:
+        totalMag = np.zeros(numKernels)
+        
+        # Everytime we remove a node, must recalculate distances for all nodes (see paper)
+        for n in range(0, numKernels-1):
+            for m in range(n+1, numKernels):
+
+                # calculate simpe 2-norm between nodes
+                # other distance metrics would be interesting to try
+                mag = np.linalg.norm(kernels[n]-kernels[m])
+                
+                totalMag[n] += mag
+                totalMag[m] += mag
+                
+                # if we've decided to prune this node before, just add distance as inf
+                if n in toPrune:
+                    totalMag[n] += np.inf
+                if m in toPrune:
+                    totalMag[m] += np.inf
+                
+        # add highest magnitude node
+        kernel = totalMag.argsort()[0]
+        toPrune.append(kernel)
+        
+    return toPrune
 
 
 def get_kernel_sum(convLayer):

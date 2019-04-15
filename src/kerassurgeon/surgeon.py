@@ -339,6 +339,7 @@ class Surgeon:
             self._new_layers_map[old_layer] = new_layer
         new_output = new_layer(utils.single_element(inputs))
         # Replace the original layer's output with the modified layer's output
+        
         self._replace_tensors[old_layer_output] = (new_output, new_delete_mask)
 
     def _apply_delete_mask(self, node, inbound_masks, layer=None, timeDistributedLayer=False):
@@ -398,9 +399,9 @@ class Surgeon:
         inbound_masks = utils.single_element(inbound_masks)
         # otherwise, delete_mask.shape should be: layer.input_shape[1:]
         layer_class = layer.__class__.__name__
+        
         if layer_class == 'InputLayer':
             raise RuntimeError('This should never get here!')
-
         elif layer_class == 'Dense':
             if np.all(inbound_masks):
                 new_layer = layer
@@ -441,6 +442,7 @@ class Surgeon:
                 config['weights'] = weights
                 new_layer = type(layer).from_config(config)
             outbound_mask = None
+            
 
         elif layer_class in ('Cropping1D', 'Cropping2D', 'Cropping3D',
                              'MaxPooling1D', 'MaxPooling2D',
@@ -542,6 +544,17 @@ class Surgeon:
                                  'channels.')
             outbound_mask = None
             new_layer = layer
+            
+            ''' Trying to do embedding pruning... not working
+            outbound_mask = None 
+            weights = layer.get_weights()
+            
+            weights[0] = weights[0][np.where(inbound_masks)[0], :]
+            config = layer.get_config()
+            config['weights'] = weights
+            new_layer = type(layer).from_config(config)
+            
+            '''
 
         elif layer_class in ('Add', 'Multiply', 'Average', 'Maximum'):
             # The inputs must be the same size
@@ -598,7 +611,7 @@ class Surgeon:
             
             new_layer = type(layer)(sublayer, name=layer.name)
             
-        
+            
         else:
             # Not implemented:
             # - Lambda
@@ -656,7 +669,7 @@ class Surgeon:
 
         # Reduce layer channel count in config.
         layer_config[channels_attr] -= len(channel_indices)
-
+        
         # Delete weights corresponding to deleted channels from config.
         # Except for recurrent layers, the weights' channels dimension is last.
         # Each recurrent layer type has a different internal weights layout.
@@ -681,8 +694,9 @@ class Surgeon:
         else:
             weights = [np.delete(w, channel_indices, axis=-1)
                        for w in layer.get_weights()]
+        
         layer_config['weights'] = weights
-
+        
         # Create new layer from the modified configuration and return it.
         if layer.__class__.__name__ == "TimeDistributed":
             # make sure to keep old layer name, will mess up otherwise
@@ -690,7 +704,8 @@ class Surgeon:
             new_layer.name = timedist_layer_name
             return new_layer
         else:
-            return type(layer).from_config(layer_config)
+            new_layer = type(layer).from_config(layer_config) 
+            return new_layer
 
     def _make_delete_mask(self, layer, channel_indices):
         """Make the boolean delete mask for layer's output deleting channels.
@@ -713,7 +728,6 @@ class Surgeon:
             
         data_format = getattr(layer, 'data_format', 'channels_last')
         shape = layer.output_shape[1:]
-        
         shape = [1 if x==None else x for x in shape]
             
         new_delete_mask = np.ones(shape, dtype=bool)
