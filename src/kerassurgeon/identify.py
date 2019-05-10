@@ -193,7 +193,7 @@ def get_nodedist(model, layer, x_val, node_indices=None, steps=None, pruneCnt=5)
                 if m in toPrune:
                     totalMag[m] += np.inf
                 
-        # add highest magnitude node
+        # add lowest magnitude node - most redundant node
         kernel = totalMag.argsort()[0]
         toPrune.append(kernel)
         
